@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -9,17 +8,11 @@ namespace Payment
     {
         static void Main(string[] args)
         {
-            int secretKey = 777;
+            PaymentSystem paymentSystem = new PaymentSystem("pay.system1.ru/order?amount=12000RUB&hash={}", new MD5Hasher());
+            PaymentSystem1 paymentSystem1 = new PaymentSystem1("order.system2.ru/pay?hash={}", new MD5Hasher());
+            PaymentSystem2 paymentSystem2 = new PaymentSystem2("system3.com/pay?amount=12000&curency=RUB&hash={}", 777, new SHA1Hasher());
 
-            Hasher hasher = Hasher.Create(new IdHasher());
-            Hasher hasher1 = Hasher.Create(new IdHasher(), new AmountHasher());
-            Hasher hasher2 = Hasher.Create(new IdHasher(), new AmountHasher(), new SecretHasрer(secretKey));
-
-            PaymentSystem paymentSystem = new PaymentSystem("pay.system1.ru/order?amount=12000RUB&hash={}", hasher);
-            PaymentSystem paymentSystem1 = new PaymentSystem("order.system2.ru/pay?hash={}", hasher1);
-            PaymentSystem paymentSystem2 = new PaymentSystem("system3.com/pay?amount=12000&curency=RUB&hash={}", hasher2);
-
-            Order order = new Order(143, 123);
+            Order order = new Order(32, 1200);
 
             Console.WriteLine(paymentSystem.GetPayingLink(order));
             Console.WriteLine(paymentSystem1.GetPayingLink(order));
@@ -33,7 +26,11 @@ public class Order
     public readonly int Id;
     public readonly int Amount;
 
-    public Order(int id, int amount) => (Id, Amount) = (id, amount);
+    public Order(int id, int amount)
+    {
+        Id = id;
+        Amount = amount;
+    }
 }
 
 public interface IPaymentSystem
@@ -41,17 +38,17 @@ public interface IPaymentSystem
     string GetPayingLink(Order order);
 }
 
-public interface IHasher
+public interface IHashSystem
 {
-    string GetOrderHash(Order order);
+    string GetOrderHash(int input);
 }
 
 public class PaymentSystem : IPaymentSystem
 {
     private string _payingLink;
-    private IHasher _hasher;
+    private IHashSystem _hasher;
 
-    public PaymentSystem(string payingLink, IHasher hasher)
+    public PaymentSystem(string payingLink, IHashSystem hasher)
     {
         if (payingLink == null)
             throw new ArgumentNullException();
@@ -68,78 +65,92 @@ public class PaymentSystem : IPaymentSystem
         if(order == null)
             throw new ArgumentNullException();
 
-        return _payingLink.Insert(_payingLink.Length - 1, _hasher.GetOrderHash(order));
+        string payLinkHash = _payingLink.Insert(_payingLink.Length - 1, _hasher.GetOrderHash(order.Id));
+
+        return payLinkHash;
     }
 }
 
-
-public class Hasher : IHasher
+public class PaymentSystem1 : IPaymentSystem
 {
-    private IEnumerable<IHasher> _hasher;
+    private string _payingLink;
+    private IHashSystem _hasher;
 
-    public Hasher (IEnumerable<IHasher> hasher)
+    public PaymentSystem1(string payingLink, IHashSystem hasher)
     {
+        if (payingLink == null)
+            throw new ArgumentNullException();
+
+        if (hasher == null)
+            throw new ArgumentNullException();
+
+        _payingLink = payingLink;
         _hasher = hasher;
     }
 
-    public string GetOrderHash(Order order)
+    public string GetPayingLink(Order order)
     {
-        if(order == null)
+        if (order == null)
             throw new ArgumentNullException();
 
-        string hash = "";
-        
-        foreach (var hasher in _hasher)
-            hash += hasher.GetOrderHash(order);
+        string hash = _hasher.GetOrderHash(order.Id) + _hasher.GetOrderHash(order.Amount);
+        string payLinkHash = _payingLink.Insert(_payingLink.Length - 1, hash);
 
-        return hash;
-    }
-
-    public static Hasher Create(params IHasher[] hasher)
-    {
-        return new Hasher(hasher);
-    }
-}
-public class IdHasher : IHasher
-{
-    public string GetOrderHash(Order order)
-    {
-        return Utilities.GetMD5(order.Id);
+        return payLinkHash;
     }
 }
 
-public class AmountHasher : IHasher
+public class PaymentSystem2 : IPaymentSystem
 {
-    public string GetOrderHash(Order order)
+    private int _secretKey;
+    private string _payingLink;
+
+    private IHashSystem _hasher;
+
+    public PaymentSystem2(string payingLink, int secretKey, IHashSystem hasher)
     {
-        return Utilities.GetMD5(order.Amount);
+        if (payingLink == null)
+            throw new ArgumentNullException();
+
+        if (hasher == null)
+            throw new ArgumentNullException();
+
+        _payingLink = payingLink;
+        _hasher = hasher;
+        _secretKey = secretKey;
+    }
+
+    public string GetPayingLink(Order order)
+    {
+        if (order == null)
+            throw new ArgumentNullException();
+
+        string hash = _hasher.GetOrderHash(order.Id) + _hasher.GetOrderHash(order.Amount) + _hasher.GetOrderHash(_secretKey);
+        string payLinkHash = _payingLink.Insert(_payingLink.Length - 1, hash);
+
+        return payLinkHash;
     }
 }
 
-public class SecretHasрer : IHasher
+public class MD5Hasher : IHashSystem
 {
-    private int _secretKay;
-
-    public SecretHasрer(int secretKay)
+    public string GetOrderHash(int input)
     {
-        _secretKay = secretKay;
-    }
-
-    public string GetOrderHash(Order order)
-    {
-        return Utilities.GetMD5(_secretKay);
-    }
-}
-
-public static class Utilities
-{
-    public static string GetMD5(int input)
-    {
-        var md5 = MD5.Create();
+        MD5 md5 = MD5.Create();
         byte[] hash = md5.ComputeHash(Encoding.UTF8.GetBytes(input.ToString()));
 
-        string replaceCahr = "-";
-
-        return BitConverter.ToString(hash).Replace(replaceCahr, "").ToLower();
+        return Convert.ToBase64String(hash);
     }
 }
+
+public class SHA1Hasher : IHashSystem
+{
+    public string GetOrderHash(int input)
+    {
+        SHA1 sha1 = SHA1.Create();
+        byte[] hash = sha1.ComputeHash(Encoding.UTF8.GetBytes(input.ToString()));
+
+        return Convert.ToBase64String(hash);
+    }
+}
+
